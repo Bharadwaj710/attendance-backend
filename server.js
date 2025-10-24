@@ -21,10 +21,14 @@ async function fetchAttendance() {
   const LOGIN_URL = "https://webprosindia.com/vignanit/Default.aspx";
 
   const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-  });
+  headless: "new",
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+  ],
+});
 
   try {
     const page = await browser.newPage();
