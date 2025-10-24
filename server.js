@@ -1,5 +1,6 @@
 import express from "express";
-import puppeteer from "puppeteer";
+import chromium from "@sparticuz/chromium";
+import puppeteer from "puppeteer-core";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -19,17 +20,12 @@ async function waitAndType(page, selector, text) {
 async function fetchAttendance() {
   const LOGIN_URL = "https://webprosindia.com/vignanit/Default.aspx";
 
-  // ✅ Puppeteer settings for Render/Vercel
+  // ✅ Puppeteer settings compatible with Vercel
   const browser = await puppeteer.launch({
-    headless: true, // ✅ "true" is safer than "new" in serverless
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-zygote",
-      "--single-process"
-    ],
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless, // auto true on Vercel
   });
 
   try {
