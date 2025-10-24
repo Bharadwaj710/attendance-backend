@@ -9,26 +9,28 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Helper to wait for selectors safely
+// 🧠 Helper function for typing safely
 async function waitAndType(page, selector, text) {
   await page.waitForSelector(selector, { visible: true, timeout: 10000 });
   await page.type(selector, text, { delay: 80 });
 }
 
-// 🧠 Core scraper: auto login → fetch attendance → extract overall %
-
+// 🎯 Core Scraper Logic
 async function fetchAttendance() {
   const LOGIN_URL = "https://webprosindia.com/vignanit/Default.aspx";
 
+  // ✅ Puppeteer settings for Render/Vercel
   const browser = await puppeteer.launch({
-  headless: "new",
-  args: [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-gpu",
-    "--disable-dev-shm-usage",
-  ],
-});
+    headless: true, // ✅ "true" is safer than "new" in serverless
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-zygote",
+      "--single-process"
+    ],
+  });
 
   try {
     const page = await browser.newPage();
@@ -48,7 +50,7 @@ async function fetchAttendance() {
       page.waitForNavigation({ waitUntil: "networkidle2", timeout: 15000 }).catch(() => {}),
     ]);
 
-    // 4️⃣ Click "Student Attendance" link
+    // 4️⃣ Navigate to Student Attendance
     const linkSelector = 'a.menuLink[href*="StudentAttendance"]';
     await page.waitForSelector(linkSelector, { timeout: 15000 });
     await page.click(linkSelector);
@@ -58,11 +60,11 @@ async function fetchAttendance() {
     const frameHandle = await page.$("#capIframeId");
     const frame = await frameHandle.contentFrame();
 
-    // 6️⃣ Select “Till now”
+    // 6️⃣ Select "Till now"
     await frame.waitForSelector("#radTillNow", { timeout: 10000 });
     await frame.click("#radTillNow");
 
-    // 7️⃣ Uncheck condonation checkbox if needed
+    // 7️⃣ Uncheck condonation if checked
     const condonation = await frame.$("#chkCondonation");
     if (condonation) {
       const checked = await (await condonation.getProperty("checked")).jsonValue();
@@ -72,39 +74,37 @@ async function fetchAttendance() {
     // 8️⃣ Click Show
     await frame.click("#btnShow");
 
-    // 9️⃣ Wait for the result table
+    // 9️⃣ Wait for the results
     await frame.waitForSelector("tr.reportData1, tr.reportData2, tr.reportData3", { timeout: 15000 });
 
     // 🔟 Extract attendance data
-    // 🔟 Extract attendance data
-const result = await frame.evaluate(() => {
-  const rows = Array.from(document.querySelectorAll("tr.reportData1, tr.reportData2, tr.reportData3"));
-  const subjects = [];
+    const result = await frame.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll("tr.reportData1, tr.reportData2, tr.reportData3"));
+      const subjects = [];
 
-  for (const r of rows) {
-    const cols = Array.from(r.querySelectorAll("td")).map(td => td.innerText.trim());
-    // expect [Sl.No, Subject, Held, Attend, %]
-    if (cols.length >= 5) {
-      subjects.push({
-        subject: cols[1],
-        held: cols[2],
-        attended: cols[3],
-        percent: cols[4],
-      });
-    }
-  }
+      for (const r of rows) {
+        const cols = Array.from(r.querySelectorAll("td")).map(td => td.innerText.trim());
+        if (cols.length >= 5) {
+          subjects.push({
+            subject: cols[1],
+            held: cols[2],
+            attended: cols[3],
+            percent: cols[4],
+          });
+        }
+      }
 
-  const totalRow = Array.from(document.querySelectorAll("tr.reportHeading2WithBackground"))
-    .map(r => Array.from(r.querySelectorAll("td")).map(td => td.innerText.trim()))
-    .find(cols => cols.join(" ").toLowerCase().includes("total"));
+      const totalRow = Array.from(document.querySelectorAll("tr.reportHeading2WithBackground"))
+        .map(r => Array.from(r.querySelectorAll("td")).map(td => td.innerText.trim()))
+        .find(cols => cols.join(" ").toLowerCase().includes("total"));
 
-  const overallPercent = totalRow ? totalRow[totalRow.length - 1] : null;
+      const overallPercent = totalRow ? totalRow[totalRow.length - 1] : null;
+      return { subjects, overallPercent };
+    });
 
-  return { subjects, overallPercent };
-});
     await browser.close();
 
-    // 🧹 Clean unwanted junk rows
+    // 🧹 Clean junk rows
     const cleaned = result.subjects.filter(
       s =>
         s.subject &&
@@ -116,12 +116,13 @@ const result = await frame.evaluate(() => {
 
     return { ok: true, data: { overallPercent: result.overallPercent, subjects: cleaned } };
   } catch (err) {
-    if (browser) await browser.close().catch(() => {});
+    await browser.close().catch(() => {});
     console.error("❌ Scraping error:", err.message);
     return { ok: false, error: err.message };
   }
 }
-// 🧩 API route
+
+// 🧩 API endpoint
 app.get("/fetch", async (req, res) => {
   const result = await fetchAttendance();
   res.json(result);
