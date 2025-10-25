@@ -1,34 +1,30 @@
 import express from "express";
-import chromium from "@sparticuz/chromium";
-import puppeteer from "puppeteer-core";
+import puppeteer from "puppeteer";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  next();
+});
 
 const PORT = process.env.PORT || 3000;
 
-// 🧠 Helper function for typing safely
-async function waitAndType(page, selector, text) {
-  await page.waitForSelector(selector, { visible: true, timeout: 10000 });
-  await page.type(selector, text, { delay: 80 });
-}
-
-// 🎯 Core Scraper Logic
-async function fetchAttendance() {
+async function fetchAttendance(username, password) {
   const LOGIN_URL = "https://webprosindia.com/vignanit/Default.aspx";
-
-  // ✅ Puppeteer settings compatible with Vercel
-  const browser = await puppeteer.launch({
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless, // auto true on Vercel
-  });
+  let browser;
 
   try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    });
+
     const page = await browser.newPage();
     page.setDefaultTimeout(20000);
 
@@ -36,17 +32,16 @@ async function fetchAttendance() {
     await page.goto(LOGIN_URL, { waitUntil: "networkidle2" });
 
     // 2️⃣ Enter credentials
-    await page.waitForSelector("#txtId2", { timeout: 15000 });
-    await page.type("#txtId2", process.env.STUDENT_USERNAME, { delay: 50 });
-    await page.type("#txtPwd2", process.env.STUDENT_PASSWORD, { delay: 50 });
+    await page.type("#txtId2", username, { delay: 50 });
+    await page.type("#txtPwd2", password, { delay: 50 });
 
     // 3️⃣ Click login
     await Promise.all([
       page.click("#imgBtn2"),
-      page.waitForNavigation({ waitUntil: "networkidle2", timeout: 15000 }).catch(() => {}),
+      page.waitForNavigation({ waitUntil: "networkidle2", timeout: 15000 }).catch(() => {})
     ]);
 
-    // 4️⃣ Navigate to Student Attendance
+    // 4️⃣ Go to attendance page
     const linkSelector = 'a.menuLink[href*="StudentAttendance"]';
     await page.waitForSelector(linkSelector, { timeout: 15000 });
     await page.click(linkSelector);
@@ -56,39 +51,35 @@ async function fetchAttendance() {
     const frameHandle = await page.$("#capIframeId");
     const frame = await frameHandle.contentFrame();
 
-    // 6️⃣ Select "Till now"
+    // 6️⃣ Select “Till now”
     await frame.waitForSelector("#radTillNow", { timeout: 10000 });
     await frame.click("#radTillNow");
 
-    // 7️⃣ Uncheck condonation if checked
+    // 7️⃣ Uncheck condonation
     const condonation = await frame.$("#chkCondonation");
     if (condonation) {
       const checked = await (await condonation.getProperty("checked")).jsonValue();
       if (checked) await condonation.click();
     }
 
-    // 8️⃣ Click Show
+    // 8️⃣ Click “Show”
     await frame.click("#btnShow");
 
-    // 9️⃣ Wait for the results
+    // 9️⃣ Wait for results
     await frame.waitForSelector("tr.reportData1, tr.reportData2, tr.reportData3", { timeout: 15000 });
 
-    // 🔟 Extract attendance data
+    // 🔟 Extract attendance
     const result = await frame.evaluate(() => {
       const rows = Array.from(document.querySelectorAll("tr.reportData1, tr.reportData2, tr.reportData3"));
-      const subjects = [];
-
-      for (const r of rows) {
+      const subjects = rows.map(r => {
         const cols = Array.from(r.querySelectorAll("td")).map(td => td.innerText.trim());
-        if (cols.length >= 5) {
-          subjects.push({
-            subject: cols[1],
-            held: cols[2],
-            attended: cols[3],
-            percent: cols[4],
-          });
-        }
-      }
+        return {
+          subject: cols[1],
+          held: cols[2],
+          attended: cols[3],
+          percent: cols[4],
+        };
+      });
 
       const totalRow = Array.from(document.querySelectorAll("tr.reportHeading2WithBackground"))
         .map(r => Array.from(r.querySelectorAll("td")).map(td => td.innerText.trim()))
@@ -99,32 +90,25 @@ async function fetchAttendance() {
     });
 
     await browser.close();
-
-    // 🧹 Clean junk rows
-    const cleaned = result.subjects.filter(
-      s =>
-        s.subject &&
-        !s.subject.toLowerCase().includes("roll") &&
-        !s.subject.toLowerCase().includes("report") &&
-        !s.subject.toLowerCase().includes("sl.") &&
-        !s.subject.toLowerCase().includes("subject")
-    );
-
-    return { ok: true, data: { overallPercent: result.overallPercent, subjects: cleaned } };
+    return { success: true, data: result };
   } catch (err) {
-    await browser.close().catch(() => {});
-    console.error("❌ Scraping error:", err.message);
-    return { ok: false, error: err.message };
+    if (browser) await browser.close().catch(() => {});
+    console.error("❌ Error:", err.message);
+    return { success: false, error: err.message };
   }
 }
 
-// 🧩 API endpoint
-app.get("/fetch", async (req, res) => {
-  const result = await fetchAttendance();
+// 🔹 POST endpoint that accepts username & password dynamically
+app.post("/fetch", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password)
+    return res.status(400).json({ error: "Missing username or password" });
+
+  const result = await fetchAttendance(username, password);
   res.json(result);
 });
 
-// ✅ Start server
-app.listen(PORT, () => {
-  console.log(`Server running → http://localhost:${PORT}`);
-});
+// ✅ Render health check
+app.get("/", (req, res) => res.send("✅ Attendance API working"));
+
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
