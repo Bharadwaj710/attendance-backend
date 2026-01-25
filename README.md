@@ -41,3 +41,7 @@ Shows:
 -Refresh button to fetch latest attendance without opening the app
 -Works even after device reboot (data persists)
 
+## Screenshot
+
+<img width="738" height="1600" alt="image" src="https://github.com/user-attachments/assets/e9868a48-6ce0-44b8-b92c-a8f0a9f51485" />
+
