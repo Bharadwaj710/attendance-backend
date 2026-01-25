@@ -41,7 +41,7 @@ Shows:
 -Refresh button to fetch latest attendance without opening the app
 -Works even after device reboot (data persists)
 
-## Screenshot
+## Screenshots
+![WhatsApp Image 2026-01-25 at 1 39 52 PM](https://github.com/user-attachments/assets/9bbc9cf9-d0d2-493d-8bc8-39f8b0e62229)
 
-<img width="738" height="1600" alt="image" src="https://github.com/user-attachments/assets/e9868a48-6ce0-44b8-b92c-a8f0a9f51485" />
 
